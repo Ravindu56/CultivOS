@@ -1,0 +1,113 @@
+name: CI — Java Services
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'release/**', 'hotfix/**']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/ravindu56/cultivos
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: read
+
+jobs:
+  detect:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            identity-service:
+              - 'services/identity-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            field-registry-service:
+              - 'services/field-registry-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            cultivation-service:
+              - 'services/cultivation-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            resource-service:
+              - 'services/resource-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            marketplace-service:
+              - 'services/marketplace-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            notification-service:
+              - 'services/notification-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            payment-service:
+              - 'services/payment-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            gis-service:
+              - 'services/gis-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            reporting-service:
+              - 'services/reporting-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            user-profile-service:
+              - 'services/user-profile-service/**'
+              - '.github/workflows/ci-java-services.yml'
+            admin-service:
+              - 'services/admin-service/**'
+              - '.github/workflows/ci-java-services.yml'
+
+  build-test:
+    name: ${{ matrix.service }}
+    needs: detect
+    if: needs.detect.outputs.services != '[]' && needs.detect.outputs.services != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build & test
+        run: |
+          if [ -f pom.xml ]; then
+            chmod +x mvnw && ./mvnw --batch-mode verify
+          else
+            echo "::notice::No pom.xml yet for ${{ matrix.service }} — scaffold pending. Skipping."
+          fi
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push Docker image
+        if: github.event_name == 'push' && hashFiles(format('services/{0}/Dockerfile', matrix.service)) != ''
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}

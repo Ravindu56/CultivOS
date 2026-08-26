@@ -1,0 +1,19 @@
+#!/bin/sh
+# Minimal Maven wrapper for CultivOS services.
+# Pins Apache Maven 3.9.9; downloads to ~/.m2/wrapper on first run.
+# Replace with the official wrapper anytime via: mvn wrapper:wrapper
+set -e
+
+MAVEN_VERSION="3.9.9"
+INSTALL_DIR="$HOME/.m2/wrapper/apache-maven-$MAVEN_VERSION"
+
+if [ ! -x "$INSTALL_DIR/bin/mvn" ]; then
+  echo "mvnw: downloading Apache Maven $MAVEN_VERSION ..."
+  mkdir -p "$HOME/.m2/wrapper"
+  TMP_TGZ="$HOME/.m2/wrapper/maven-$MAVEN_VERSION.tgz"
+  curl -fsSL "https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/$MAVEN_VERSION/apache-maven-$MAVEN_VERSION-bin.tar.gz" -o "$TMP_TGZ"
+  tar -xzf "$TMP_TGZ" -C "$HOME/.m2/wrapper"
+  rm -f "$TMP_TGZ"
+fi
+
+exec "$INSTALL_DIR/bin/mvn" "$@"

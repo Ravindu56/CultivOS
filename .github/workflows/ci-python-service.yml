@@ -34,15 +34,20 @@ jobs:
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: |
+            services/ai-crop-service/requirements.txt
+            services/ai-crop-service/requirements-dev.txt
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip ruff pytest pytest-asyncio httpx
-          [ -f requirements.txt ] && pip install -r requirements.txt || true
-          [ -f requirements-dev.txt ] && pip install -r requirements-dev.txt || true
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
       - name: Ruff lint
         run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
 
       - name: Pytest
         run: |

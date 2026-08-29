@@ -1,8 +1,13 @@
+# CultivOS — Local Development Infrastructure
+# Epic #21 baseline: Kafka 4.3 KRaft (no Zookeeper), WSO2 IS 7.1.0, MinIO, OpenTelemetry
+# Usage: docker compose -f docker-compose.dev.yml up -d
+# Reset: docker compose -f docker-compose.dev.yml down -v && up -d
+
 name: cultivos-dev
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    image: postgis/postgis:17-3.5
     container_name: cultivos-postgres
     environment:
       POSTGRES_USER: cultivos
@@ -11,68 +16,110 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
       - ./infra/db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cultivos"]
+      test: ["CMD-SHELL", "pg_isready -U cultivos -d cultivos_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
-    image: redis:7.2-alpine
+    image: redis:7-alpine
     container_name: cultivos-redis
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
     volumes:
-      - redis_data:/data
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
-
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.1
-    container_name: cultivos-zookeeper
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
 
   kafka:
-    image: confluentinc/cp-kafka:7.6.1
+    image: apache/kafka:4.3.1
     container_name: cultivos-kafka
-    depends_on:
-      - zookeeper
-    ports:
-      - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTVFOTdGNDcyQQ
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
       interval: 15s
       timeout: 10s
-      retries: 5
+      retries: 10
 
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest
+    image: provectuslabs/kafka-ui:latest # TODO: pin version tag before merge
     container_name: cultivos-kafka-ui
     depends_on:
       kafka:
         condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cultivos-dev
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
     ports:
       - "8080:8080"
+
+  minio:
+    image: minio/minio:latest # TODO: pin RELEASE tag before merge
+    container_name: cultivos-minio
+    command: server /data --console-address ":9001"
     environment:
-      KAFKA_CLUSTERS_0_NAME: cultivos-local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      MINIO_ROOT_USER: cultivos
+      MINIO_ROOT_PASSWORD: cultivos_dev
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  wso2is:
+    image: wso2/wso2is:7.1.0
+    container_name: cultivos-wso2is
+    ports:
+      - "9443:9443"   # Console + OIDC endpoints (admin/admin — change for shared envs)
+    volumes:
+      - isdata:/home/wso2carbon/wso2is-7.1.0/repository/deployment/server
+    healthcheck:
+      test: ["CMD-SHELL", "curl -kf https://localhost:9443/api/health-check/v1.0/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest # TODO: pin version tag before merge
+    container_name: cultivos-otel-collector
+    command: ["--config=/etc/otelcol-contrib/otel-collector-config.yaml"]
+    volumes:
+      - ./infra/otel/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (scrape target)
 
 volumes:
-  postgres_data:
-  redis_data:
+  pgdata:
+  redisdata:
+  kafkadata:
+  miniodata:
+  isdata:

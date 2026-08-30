@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   detect:
-    name: Detect changed services
+    name: detect
     runs-on: ubuntu-latest
     outputs:
       services: ${{ steps.filter.outputs.changes }}
@@ -63,7 +63,7 @@ jobs:
               - 'services/admin-service/**'
               - '.github/workflows/ci-java-services.yml'
 
-  build-test:
+  build-test-matrix:
     name: ${{ matrix.service }}
     needs: detect
     if: needs.detect.outputs.services != '[]' && needs.detect.outputs.services != ''
@@ -111,3 +111,24 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+  # Rollup gate — always runs, always reports as check "build-test".
+  # Passes when the matrix is skipped (no services changed) or all legs pass;
+  # fails if any leg failed or was cancelled. Required by branch protection.
+  build-test:
+    name: build-test
+    needs: [detect, build-test-matrix]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gate on matrix result
+        run: |
+          echo "detect: ${{ needs.detect.result }}"
+          echo "build-test-matrix: ${{ needs.build-test-matrix.result }}"
+          if [ "${{ needs.detect.result }}" != "success" ]; then
+            echo "::error::detect job did not succeed"; exit 1
+          fi
+          if [ "${{ needs.build-test-matrix.result }}" == "failure" ] || [ "${{ needs.build-test-matrix.result }}" == "cancelled" ]; then
+            echo "::error::One or more service builds failed or were cancelled"; exit 1
+          fi
+          echo "All service builds passed or were skipped (no changes)."

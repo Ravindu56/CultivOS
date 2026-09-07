@@ -1,0 +1,2 @@
+# JWT RSA keypairs must never be committed (#11) — dev keys live here locally only.
+*.pem

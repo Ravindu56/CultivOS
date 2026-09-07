@@ -25,6 +25,16 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
 
+# JWT — RS256 keypair (#11). PEM files live under keys/ locally and are never
+# committed (keys/.gitignore). Generate dev keys:
+#   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out keys/private.pem
+#   openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+jwt:
+  private-key-path: ${JWT_PRIVATE_KEY_PATH:file:./keys/private.pem}
+  public-key-path: ${JWT_PUBLIC_KEY_PATH:file:./keys/public.pem}
+  access-token-ttl: PT15M      # 15 minutes
+  refresh-token-ttl: P7D       # 7 days
+
 # Actuator — liveness/readiness probes used by Docker healthcheck (#15) and K8s
 management:
   endpoints:

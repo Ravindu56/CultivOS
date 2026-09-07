@@ -120,6 +120,11 @@ public class JwtService {
         return publicKey;
     }
 
+    /** Access-token TTL in seconds — exposed for TokenResponse.expiresIn (#16). */
+    public long accessTokenTtlSeconds() {
+        return accessTokenTtl.toSeconds();
+    }
+
     private static byte[] pemBytes(Resource resource, String blockType) throws IOException {
         String pem = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
                 .replace("-----BEGIN " + blockType + "-----", "")

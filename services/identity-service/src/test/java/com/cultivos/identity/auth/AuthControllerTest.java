@@ -9,6 +9,8 @@ import com.cultivos.identity.config.SecurityConfig;
 import com.cultivos.identity.security.JwtService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ClaimsBuilder;
+import io.jsonwebtoken.Jwts;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -22,7 +24,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -184,12 +185,20 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.status").value("ok"));
     }
 
+    /**
+     * Real Claims via the jjwt builder — Mockito cannot stub the generic
+     * {@code get(String, Class)} method on the Claims interface (UnfinishedStubbingException in CI).
+     */
     private static Claims claimsWith(String type, List<String> roles) {
-        Claims claims = mock(Claims.class);
-        when(claims.getSubject()).thenReturn(UUID.randomUUID().toString());
-        when(claims.get("email", String.class)).thenReturn("nimal@example.lk");
-        when(claims.get(JwtService.CLAIM_TYPE, String.class)).thenReturn(type);
-        when(claims.get(JwtService.CLAIM_ROLES, List.class)).thenReturn(roles);
-        return claims;
+        ClaimsBuilder builder = Jwts.claims()
+                .subject(UUID.randomUUID().toString())
+                .add("email", "nimal@example.lk");
+        if (roles != null) {
+            builder.add(JwtService.CLAIM_ROLES, roles);
+        }
+        if (type != null) {
+            builder.add(JwtService.CLAIM_TYPE, type);
+        }
+        return builder.build();
     }
 }

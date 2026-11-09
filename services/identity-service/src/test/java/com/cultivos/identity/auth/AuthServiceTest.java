@@ -20,8 +20,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -216,6 +216,8 @@ class AuthServiceTest {
         User user = new User("nimal@example.lk", "+94771234567",
                 passwordEncoder.encode(PASSWORD), "Nimal Perera", "en");
         user.getRoles().add(new Role(Role.FARMER));
+        // id is DB/JPA-generated at runtime — set it explicitly for unit tests
+        ReflectionTestUtils.setField(user, "id", UUID.randomUUID());
         return user;
     }
 }

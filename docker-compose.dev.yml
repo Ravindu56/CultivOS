@@ -1,7 +1,18 @@
 # CultivOS — Local Development Infrastructure
-# Epic #21 baseline: Kafka 4.3 KRaft (no Zookeeper), WSO2 IS 7.1.0, MinIO, OpenTelemetry
-# Usage: docker compose -f docker-compose.dev.yml up -d
-# Reset: docker compose -f docker-compose.dev.yml down -v && up -d
+# Epic #21 baseline: Kafka 4.3 KRaft (no Zookeeper), WSO2 IS 7.1.0, RustFS (S3), OpenTelemetry
+#
+# Profiles:
+#   core  - postgres, redis, kafka, kafka-ui, rustfs
+#   auth  - wso2is (combine with core)
+#   full  - everything, including otel-collector
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml --profile core up -d
+#   docker compose -f docker-compose.dev.yml --profile core --profile auth up -d
+#   docker compose -f docker-compose.dev.yml --profile full up -d
+# Reset: docker compose -f docker-compose.dev.yml --profile full down -v
+#
+# Object storage credentials can be overridden with RUSTFS_ACCESS_KEY / RUSTFS_SECRET_KEY.
 
 name: cultivos-dev
 
@@ -9,6 +20,7 @@ services:
   postgres:
     image: postgis/postgis:17-3.5
     container_name: cultivos-postgres
+    profiles: ["core", "full"]
     environment:
       POSTGRES_USER: cultivos
       POSTGRES_PASSWORD: cultivos_dev
@@ -27,6 +39,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: cultivos-redis
+    profiles: ["core", "full"]
     command: redis-server --appendonly yes
     ports:
       - "6379:6379"
@@ -41,6 +54,7 @@ services:
   kafka:
     image: apache/kafka:4.3.1
     container_name: cultivos-kafka
+    profiles: ["core", "full"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -63,8 +77,10 @@ services:
       retries: 10
 
   kafka-ui:
-    image: provectuslabs/kafka-ui:latest # TODO: pin version tag before merge
+    # Kafbat is the maintained fork of provectuslabs/kafka-ui (paused since 2023)
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
     container_name: cultivos-kafka-ui
+    profiles: ["core", "full"]
     depends_on:
       kafka:
         condition: service_healthy
@@ -74,27 +90,47 @@ services:
     ports:
       - "8080:8080"
 
-  minio:
-    image: minio/minio:latest # TODO: pin RELEASE tag before merge
-    container_name: cultivos-minio
-    command: server /data --console-address ":9001"
+  # S3-compatible object storage. Replaces MinIO, which no longer publishes official images.
+  rustfs-perms:
+    image: alpine:3.20
+    container_name: cultivos-rustfs-perms
+    profiles: ["core", "full"]
+    user: root
+    command: chown -R 10001:10001 /data
+    volumes:
+      - rustfsdata:/data
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.4
+    container_name: cultivos-rustfs
+    profiles: ["core", "full"]
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
     environment:
-      MINIO_ROOT_USER: cultivos
-      MINIO_ROOT_PASSWORD: cultivos_dev
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cultivos}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-cultivos_dev}
     ports:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Console
     volumes:
-      - miniodata:/data
+      - rustfsdata:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/health || exit 1"]
+      interval: 15s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   wso2is:
     image: wso2/wso2is:7.1.0
     container_name: cultivos-wso2is
+    profiles: ["auth", "full"]
     ports:
       - "9443:9443"   # Console + OIDC endpoints (admin/admin — change for shared envs)
     volumes:
@@ -107,8 +143,9 @@ services:
       start_period: 90s
 
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest # TODO: pin version tag before merge
+    image: otel/opentelemetry-collector-contrib:0.165.0
     container_name: cultivos-otel-collector
+    profiles: ["full"]
     command: ["--config=/etc/otelcol-contrib/otel-collector-config.yaml"]
     volumes:
       - ./infra/otel/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml:ro
@@ -121,5 +158,5 @@ volumes:
   pgdata:
   redisdata:
   kafkadata:
-  miniodata:
+  rustfsdata:
   isdata:
